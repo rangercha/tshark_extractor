@@ -3,7 +3,13 @@ import string;
 import binascii;
 import sys;
 import argparse;
+import gzip;
+try:
+  from cStringIO import StringIO;
+except:
+  from StringIO import StringIO;
 from subprocess import check_output;
+
 
 #or filters for all the streams together. 
 def build_stream_filter(stream_list):
@@ -13,33 +19,52 @@ def build_stream_filter(stream_list):
 #place them in the "outdir" directory.
 
 def extract_files(outdir, infile, displayfilter):
-#extract all the stream numbers containing the specified display filter
+  #extract all the stream numbers containing the specified display filter
   matching_streams_list = check_output(["tshark", "-r", infile, "-Y", displayfilter, "-T", "fields", "-e", "tcp.stream"]).split();
   matching_streams_list = list(set(matching_streams_list));
-#sometimes tshark returns the nonsensical tcp stream of 0. 
+  #sometimes tshark returns the nonsensical tcp stream of 0. 
   try:
     matching_streams_list.remove("0");
   except:
     pass  
-#now we re-run the tshark query with the list of streams in the display filter.
-#return stream numbers and the reassembled data. we'll use the stream number in the file name so it can be found in wireshark later if necessary
-  hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(" + build_stream_filter(matching_streams_list) + ") && " + displayfilter, "-T", "fields", "-e", "tcp.stream", "-e", "tcp.reassembled.data"]).split();
+  #now we re-run the tshark query with the list of streams in the display filter.
+  #return stream numbers and the reassembled data. we'll use the stream number in the file name so it can be found in wireshark later if necessary
+  hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(" + build_stream_filter(matching_streams_list) + ") && " + displayfilter + " && http.content_length > 0", "-T", "fields", "-e", "tcp.reassembled.data", "-e", "tcp.stream"]).split();
 
-#extract the stream numbers from the returned list
+  #extract the stream numbers from the returned list
   ordered_stream_list=[];
-  for stream_index in xrange(0,len(hex_stream_data_list),2):
-    ordered_stream_list.append(hex_stream_data_list[stream_index]);
+  raw_data_list=[];
+  found_flag=0;
 
-#remove the stream numbers from the returned list
-  for stream_index in ordered_stream_list:
-    hex_stream_data_list.remove(stream_index);
+  #tshark returns stream numbers with no data sometimes. so we'll find the items with hex encoded data and convert them to their normal binary values.
+  #when only take the stream info that immediately follows the data to avoid the extraneous items.
+  for matching_item in tshark_return_data_list:
+  #hex-encoded data > 1 byte will have a : in it.
+    if not ":" in matching_item:
+    #not hex-encoded
+      if found_flag==1:  
+      #ensure we're immediately following an actual data item
+        ordered_stream_list.append(matching_item);
+        found_flag=0;
+    else:
+    #code path for hex entries
+      matching_item=binascii.unhexlify(matching_item.replace(":",""));
+      #find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard
+      end_of_header=matching_item.index('\r\n\r\n')+4;
+      if 'Content-Encoding: gzip' in matching_item[:end_of_header]:
+      #Content-Encoding header indicates gzipped content. try to uncompress
+        buf=StringIO(matching_item[end_of_header:]);
+        f = gzip.GzipFile(fileobj=buf);
+        matching_item = f.read();
+      else:
+      #not gzipped, just grab the response body
+        matching_item = matching_item[end_of_header:];
 
-#convert the hex-encoded data back to binary
-  raw_data_list = [binascii.unhexlify(hex_stream_data.replace(":","")) for hex_stream_data in hex_stream_data_list];
-#the reassembled stream data contains the response headers. Remove everything up to the first \r\n\r\n sequence.
-  raw_data_list = [raw_data[raw_data.index('\r\n\r\n')+4:] for raw_data in raw_data_list];
+      #add the resultant value to the output list
+      raw_data_list.append(matching_item);
+      found_flag=1;
 
-#take the raw bytes and write them out to files.
+  #take the raw bytes and write them out to files.
   for file_index, file_bytes in enumerate(raw_data_list):
     fh=open(outdir + 'stream_'+ordered_stream_list[file_index]+'_'+str(file_index),'w');
     fh.write(file_bytes);
