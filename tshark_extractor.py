@@ -11,10 +11,18 @@ except:
 from subprocess import check_output;
 
 def parse_http_stream(matching_item):
+  """
+  Based on a tshark http stream, returns a list item of a file name and binary data
+  """
+  end_of_header=-1;
   file_bytes=binascii.unhexlify(matching_item[1].replace(":","").strip("\""));
+  try:
   #find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard
-  end_of_header=file_bytes.index('\r\n\r\n')+4;
-  if 'Content-Encoding: gzip' in matching_item[:end_of_header]:
+    end_of_header=file_bytes.index('\r\n\r\n')+4;
+  except ValueError:
+    return; 
+  #print(matching_item[:end_of_header]);
+  if 'Content-Encoding: gzip' in file_bytes[:end_of_header]:
     #Content-Encoding header indicates gzipped content. try to uncompress
     buf=StringIO(file_bytes[end_of_header:]);
     f = gzip.GzipFile(fileobj=buf);
@@ -22,15 +30,25 @@ def parse_http_stream(matching_item):
   else:
     #not gzipped, just grab the response body
     file_bytes = file_bytes[end_of_header:];
+  #just base the file name on the stream number
   return ["http_stream_"+matching_item[2].strip("\""),file_bytes];
 
 def parse_smb_stream(matching_item):
+  """
+  Based on a tshark smb stream, returns a list item of a file name and binary data
+  """
   file_bytes=binascii.unhexlify(matching_item[4].replace(":","").strip("\""));
-  return [matching_item[5].strip("\"") + "_" + matching_item[3].strip("\""), file_bytes];
+  #SMB file names are easily extracted from tshark
+  #use the file name_file id as the name to avoid duplicates.
+  return [matching_item[5].strip("\"").replace("\"","_") + "_" + matching_item[3].strip("\""), file_bytes];
 
 def parse_tftp_stream(matching_item):
+  """
+  Based on a tshark tftp stream, returns a list item of a file name and binary data
+  """
   file_bytes=binascii.unhexlify(matching_item[6].replace('\"','').replace(":",""));
   file_name="";
+  #use either the source_file or destination_file, source port, and destination port for the file name
   if matching_item[7].strip("\"")=='':
     file_name=matching_item[8].strip("\"") + "_" + matching_item[9].strip("\"") + "_" + matching_item[10].strip("\"");
   else:
@@ -38,10 +56,10 @@ def parse_tftp_stream(matching_item):
 
   return [file_name,file_bytes];
 
-#extract files matching the specified display filter from the pcap file specified in "infile"
-#place them in the "outdir" directory.
-
 def extract_files(outdir, infile, displayfilter):
+  """
+  Based on command line arguments, extracts files to the specified directory
+  """
   #extract all the stream numbers containing the specified display filter
   #return stream numbers and the reassembled data. we'll use the stream number in the file name so it can be found in wireshark later if necessary
   #return columns
@@ -61,7 +79,7 @@ def extract_files(outdir, infile, displayfilter):
   #[8]:tftp.destination_file
   #[9]:udp.srcport
   #[10]:udp.dstport
-  hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
+  hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
 
   ftp_data_streams=[];
   reassembled_streams=[];
@@ -70,12 +88,15 @@ def extract_files(outdir, infile, displayfilter):
   for matching_item in hex_stream_data_list:
     x_item=matching_item.split("^");
     x_protocol=x_item[0].strip("\"");
-    if x_protocol=='HTTP':
+    #pick a parsing method based on the protocol as defined by tshark
+    if (x_protocol=='HTTP' or x_protocol=='HTTP/XML'):
+      #Use HTTP parsing method
       parsed_stream = parse_http_stream(x_item);
-      search_index=[x for x,y in enumerate(reassembled_streams) if y[1]==parsed_stream[1]];
-      if len(search_index)>0:
-        parsed_stream[0]=parsed_stream[0]+"_"+search_index;
-      reassembled_streams.append(parsed_stream);
+      if parsed_stream is not None:
+        search_index=[x for x,y in enumerate(reassembled_streams) if parsed_stream[0] in y[0]];
+        if len(search_index)>0:
+          parsed_stream[0]=parsed_stream[0]+"_"+str(len(search_index));
+        reassembled_streams.append(parsed_stream);
     elif x_protocol=='SMB':
       parsed_stream = parse_smb_stream(x_item);
       print(parsed_stream[0]);
@@ -93,8 +114,8 @@ def extract_files(outdir, infile, displayfilter):
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='FTP-DATA':
       ftp_data_streams.append(x_item[2].strip("\""));
-    else:
-      print("untrapped protocol: ---" + matching_item[0].strip("\"") + "---\n");
+    elif x_protocol!='':
+      print("untrapped protocol: ---" + x_protocol + "---\n");
 
   for reassembled_item in reassembled_streams:
     fh=open(outdir + reassembled_item[0],'w');
