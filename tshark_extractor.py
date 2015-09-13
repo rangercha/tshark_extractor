@@ -92,41 +92,60 @@ def extract_files(outdir, infile, displayfilter):
     if (x_protocol=='HTTP' or x_protocol=='HTTP/XML'):
       #Use HTTP parsing method
       parsed_stream = parse_http_stream(x_item);
+      #parse_http_stream can trap partial streams and return a None value. 
       if parsed_stream is not None:
+        #we have a valid stream. search the list of previous streams. Create a list of all files coming from the current stream
         search_index=[x for x,y in enumerate(reassembled_streams) if parsed_stream[0] in y[0]];
         if len(search_index)>0:
+          #if we found a match, then we need to modify our filename so we don't overwrite the others
           parsed_stream[0]=parsed_stream[0]+"_"+str(len(search_index));
+        #add the file to the list of extracted files
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='SMB':
+      #use SMB parsing method
       parsed_stream = parse_smb_stream(x_item);
-      print(parsed_stream[0]);
+      #search the previous streams. Create a list of matching file names
       search_index=[x for x,y in enumerate(reassembled_streams) if (y[0])==parsed_stream[0]];
       if len(search_index)>0:
+        #if the file name already exists, append the raw bytes to those of the existing file
         reassembled_streams[search_index[0]][1]=reassembled_streams[search_index[0]][1]+parsed_stream[1];
       else:
+        #the file has not yet had any packets parsed out, start a new reassembled stream
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='TFTP':
+      #use TFTP parsing method
       parsed_stream = parse_tftp_stream(x_item);
+      #search the previous streams. Create a list of matching file names
       search_index=[x for x,y in enumerate(reassembled_streams) if (y[0])==parsed_stream[0]];
       if len(search_index)>0:
+        #if the file name already exists, append the raw bytes to those of the existing file
         reassembled_streams[search_index[0]][1]=reassembled_streams[search_index[0]][1]+parsed_stream[1];
       else:
+        #the file has not yet had any packets parsed out, start a new reassembled stream
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='FTP-DATA':
+      #ftp streams are handled in a totally different method
       ftp_data_streams.append(x_item[2].strip("\""));
     elif x_protocol!='':
-      print("untrapped protocol: ---" + x_protocol + "---\n");
+      #this shouldn't be possible, display a warning message
+      print("WARNING: untrapped protocol: ---" + x_protocol + "---\n");
 
   for reassembled_item in reassembled_streams:
+    #write all reassembled streams to files
     fh=open(outdir + reassembled_item[0],'w');
     fh.write(reassembled_item[1]);
     fh.close();
 
   for stream_number in ftp_data_streams:
+    #handle FTP streams
+    #for each stream, rerun tshark to extract raw data from the stream.
     hex_stream_list = check_output(["tshark", "-q", "-n", "-r", infile, "-z", "follow,tcp,raw," + stream_number]).split("\n");
     list_length = len(hex_stream_list);
+    #strip the excess output from the tshark extraction
     hex_stream_text = ''.join(hex_stream_list[6:list_length-2]);
+    #convert the hex back to raw bytes
     file_bytes=binascii.unhexlify(hex_stream_text);
+    #write extracted FTP files
     fh=open(outdir + 'ftp_stream_'+stream_number,'w');
     fh.write(file_bytes);
     fh.close();
