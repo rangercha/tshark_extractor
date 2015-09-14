@@ -4,6 +4,7 @@ import binascii;
 import sys;
 import argparse;
 import gzip;
+import os;
 try:
   from cStringIO import StringIO;
 except:
@@ -40,7 +41,7 @@ def parse_smb_stream(matching_item):
   file_bytes=binascii.unhexlify(matching_item[4].replace(":","").strip("\""));
   #SMB file names are easily extracted from tshark
   #use the file name_file id as the name to avoid duplicates.
-  return [matching_item[5].strip("\"").replace("\"","_") + "_" + matching_item[3].strip("\""), file_bytes];
+  return [matching_item[5].strip("\"").replace("\\","_") + "_" + matching_item[3].strip("\""), file_bytes];
 
 def parse_tftp_stream(matching_item):
   """
@@ -79,7 +80,10 @@ def extract_files(outdir, infile, displayfilter):
   #[8]:tftp.destination_file
   #[9]:udp.srcport
   #[10]:udp.dstport
-  hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
+  if displayfilter=='':
+    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
+  else:
+    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
 
   ftp_data_streams=[];
   reassembled_streams=[];
@@ -132,7 +136,7 @@ def extract_files(outdir, infile, displayfilter):
 
   for reassembled_item in reassembled_streams:
     #write all reassembled streams to files
-    fh=open(outdir + reassembled_item[0],'w');
+    fh=open(os.path.join(outdir,reassembled_item[0]),'w');
     fh.write(reassembled_item[1]);
     fh.close();
 
@@ -146,22 +150,26 @@ def extract_files(outdir, infile, displayfilter):
     #convert the hex back to raw bytes
     file_bytes=binascii.unhexlify(hex_stream_text);
     #write extracted FTP files
-    fh=open(outdir + 'ftp_stream_'+stream_number,'w');
+    fh=open(os.path.join(outdir,'ftp_stream_'+stream_number),'w');
     fh.write(file_bytes);
     fh.close();
 
 def main(args):
   parser = argparse.ArgumentParser();
-  parser.add_argument('-o', '--outdir', default='./');
+  parser.add_argument('-o', '--outdir', default='output/');
   parser.add_argument('-i', '--infile');
-  parser.add_argument('-D', '--displayfilter');
+  parser.add_argument('-D', '--displayfilter', default='');
   args = parser.parse_args();
 
   if not args.infile:
     parser.error('Missing input file argument.');
-  
-  if not args.displayfilter:
-    parser.error('Missing display filter argument.');
+
+  try:
+    os.makedirs(vars(args)['outdir']);
+  except OSError:
+    if not os.path.isdir(vars(args)['outdir']):
+      raise;
+
 
   extract_files(vars(args)['outdir'], vars(args)['infile'], vars(args)['displayfilter']);
 
