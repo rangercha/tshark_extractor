@@ -41,20 +41,18 @@ def parse_smb_stream(matching_item):
   file_bytes=binascii.unhexlify(matching_item[4].replace(":","").strip("\""));
   #SMB file names are easily extracted from tshark
   #use the file name_file id as the name to avoid duplicates.
-  return [matching_item[5].strip("\"").replace("\\","_") + "_" + matching_item[3].strip("\""), file_bytes];
+  return ["smb_id_" + matching_item[3].strip("\""), file_bytes];
 
 def parse_tftp_stream(matching_item):
   """
   Based on a tshark tftp stream, returns a list item of a file name and binary data
   """
-  file_bytes=binascii.unhexlify(matching_item[6].replace('\"','').replace(":",""));
+  file_bytes=binascii.unhexlify(matching_item[5].replace('\"','').replace(":",""));
   file_name="";
   #use either the source_file or destination_file, source port, and destination port for the file name
-  if matching_item[7].strip("\"")=='':
-    file_name=matching_item[8].strip("\"") + "_" + matching_item[9].strip("\"") + "_" + matching_item[10].strip("\"");
-  else:
-    file_name=matching_item[7].strip("\"") + "_" + matching_item[9].strip("\"") + "_" + matching_item[10].strip("\"");
 
+  file_name="tftp_stream_" + matching_item[6].strip("\"");
+  
   return [file_name,file_bytes];
 
 def extract_files(outdir, infile, displayfilter):
@@ -73,24 +71,21 @@ def extract_files(outdir, infile, displayfilter):
   #used by SMB
   #[3]:smb.fid
   #[4]:smb.file_data
-  #[5]:smb.file
   #used by TFTP
-  #[6]:data
-  #[7]:tftp.source_file
-  #[8]:tftp.destination_file
-  #[9]:udp.srcport
-  #[10]:udp.dstport
+  #[5]:data
+  #[6]:udp.stream
+
   if displayfilter=='':
-    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
+    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=|"]).split();
   else:
-    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data", "-e", "smb.file","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=^"]).split();
+    hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", displayfilter + " && (http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=|"]).split();
 
   ftp_data_streams=[];
   reassembled_streams=[];
   #tshark returns stream numbers with no data sometimes. so we'll find the items with hex encoded data and convert them to their normal binary values.
   #when only take the stream info that immediately follows the data to avoid the extraneous items.
   for matching_item in hex_stream_data_list:
-    x_item=matching_item.split("^");
+    x_item=matching_item.split("|");
     x_protocol=x_item[0].strip("\"");
     #pick a parsing method based on the protocol as defined by tshark
     if (x_protocol=='HTTP' or x_protocol=='HTTP/XML'):
