@@ -18,20 +18,20 @@ def parse_http_stream(matching_item):
   end_of_header=-1;
   file_bytes=binascii.unhexlify(matching_item[1].replace(":","").strip("\""));
   try:
-    #find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard
+    # Find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard.
     end_of_header=file_bytes.index('\r\n\r\n')+4;
   except ValueError:
     return;
-    #print(matching_item[:end_of_header]);
+    # Print(matching_item[:end_of_header]).
   if 'Content-Encoding: gzip' in file_bytes[:end_of_header]:
-    #Content-Encoding header indicates gzipped content. try to uncompress
+    # Content-Encoding header indicates gzipped content. Try to uncompress.
     buf=StringIO(file_bytes[end_of_header:]);
     f = gzip.GzipFile(fileobj=buf);
     file_bytes = f.read();
   else:
-    #not gzipped, just grab the response body
+    # Not gzipped, just grab the response body.
     file_bytes = file_bytes[end_of_header:];
-  #just base the file name on the stream number
+  # Just base the file name on the stream number.
   return ["http_stream_"+matching_item[2].strip("\""),file_bytes];
 
 def parse_smb_stream(matching_item):
@@ -39,17 +39,17 @@ def parse_smb_stream(matching_item):
   Based on a tshark smb stream, returns a list item of a file name and binary data
   """
   file_bytes=binascii.unhexlify(matching_item[4].replace(":","").strip("\""));
-  #SMB file names are easily extracted from tshark
-  #use the file name_file id as the name to avoid duplicates.
+  # SMB file names are easily extracted from tshark.
+  # Use the file name_file id as the name to avoid duplicates.
   return ["smb_id_" + matching_item[3].strip("\""), file_bytes];
 
 def parse_tftp_stream(matching_item):
   """
-  Based on a tshark tftp stream, returns a list item of a file name and binary data
+  Based on a tshark tftp stream, returns a list item of a file name and binary data.
   """
   file_bytes=binascii.unhexlify(matching_item[5].replace('\"','').replace(":",""));
   file_name="";
-  #use either the source_file or destination_file, source port, and destination port for the file name
+  # Use either the source_file or destination_file, source port, and destination port for the file name.
 
   file_name="tftp_stream_" + matching_item[6].strip("\"");
 
@@ -59,21 +59,21 @@ def extract_files(outdir, infile, displayfilter):
   """
   Based on command line arguments, extracts files to the specified directory
   """
-  #extract all the stream numbers containing the specified display filter
-  #return stream numbers and the reassembled data. we'll use the stream number in the file name so it can be found in wireshark later if necessary
-  #return columns
-  #used to determine protocol
-  #[0]:_ws.col.Protocol
-  #used by HTTP
-  #[1]:tcp.reassembled.data
-  #used by HTTP and FTP
-  #[2]:tcp.stream
-  #used by SMB
-  #[3]:smb.fid
-  #[4]:smb.file_data
-  #used by TFTP
-  #[5]:data
-  #[6]:udp.stream
+  # Extract all the stream numbers containing the specified display filter.
+  # Return stream numbers and the reassembled data. We'll use the stream number in the file name so it can be found in wireshark later if necessary.
+  # Return columns.
+  # Used to determine protocol:
+  # [0]:_ws.col.Protocol
+  # Used by HTTP:
+  # [1]:tcp.reassembled.data
+  # Used by HTTP and FTP:
+  # [2]:tcp.stream
+  # Used by SMB:
+  # [3]:smb.fid
+  # [4]:smb.file_data
+  # Used by TFTP:
+  # [5]:data
+  # [6]:udp.stream
 
   if displayfilter=='':
     hex_stream_data_list = check_output(["tshark", "-r", infile, "-Y", "(http.content_length > 0 || (smb.file_data && smb.remaining==0) || ftp-data || tftp.opcode==3)", "-T", "fields", "-e", "_ws.col.Protocol", "-e", "tcp.reassembled.data", "-e", "tcp.stream", "-e", "smb.fid", "-e", "smb.file_data","-e", "data", "-e", "tftp.source_file", "-e", "tftp.destination_file", "-e", "udp.srcport", "-e", "udp.dstport", "-E", "quote=d","-E", "occurrence=a", "-E", "separator=|"]).split();
@@ -82,69 +82,69 @@ def extract_files(outdir, infile, displayfilter):
 
   ftp_data_streams=[];
   reassembled_streams=[];
-  #tshark returns stream numbers with no data sometimes. so we'll find the items with hex encoded data and convert them to their normal binary values.
-  #when only take the stream info that immediately follows the data to avoid the extraneous items.
+  # Tshark returns stream numbers with no data sometimes. So, we'll find the items with hex encoded data and convert them to their normal binary values.
+  # When only take the stream info that immediately follows the data to avoid the extraneous items.
   for matching_item in hex_stream_data_list:
     x_item=matching_item.split("|");
     x_protocol=x_item[0].strip("\"");
-    #pick a parsing method based on the protocol as defined by tshark
+    # Pick a parsing method based on the protocol as defined by tshark.
     if (x_protocol=='HTTP' or x_protocol=='HTTP/XML'):
-      #Use HTTP parsing method
+      # Use HTTP parsing method.
       parsed_stream = parse_http_stream(x_item);
-      #parse_http_stream can trap partial streams and return a None value. 
+      # Parse_http_stream can trap partial streams and return a None value.
       if parsed_stream is not None:
-        #we have a valid stream. search the list of previous streams. Create a list of all files coming from the current stream
+        # We have a valid stream. search the list of previous streams. Create a list of all files coming from the current stream.
         search_index=[x for x,y in enumerate(reassembled_streams) if parsed_stream[0] in y[0]];
         if len(search_index)>0:
-          #if we found a match, then we need to modify our filename so we don't overwrite the others
+          # If we found a match, then we need to modify our filename so we don't overwrite the others.
           parsed_stream[0]=parsed_stream[0]+"_"+str(len(search_index));
-        #add the file to the list of extracted files
+        # Add the file to the list of extracted files.
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='SMB':
-      #use SMB parsing method
+      # Use SMB parsing method.
       parsed_stream = parse_smb_stream(x_item);
-      #search the previous streams. Create a list of matching file names
+      # Search the previous streams. Create a list of matching file names.
       search_index=[x for x,y in enumerate(reassembled_streams) if (y[0])==parsed_stream[0]];
       if len(search_index)>0:
-        #if the file name already exists, append the raw bytes to those of the existing file
+        # If the file name already exists, append the raw bytes to those of the existing file.
         reassembled_streams[search_index[0]][1]=reassembled_streams[search_index[0]][1]+parsed_stream[1];
       else:
-        #the file has not yet had any packets parsed out, start a new reassembled stream
+        # The file has not yet had any packets parsed out, start a new reassembled stream.
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='TFTP':
-      #use TFTP parsing method
+      # Use TFTP parsing method.
       parsed_stream = parse_tftp_stream(x_item);
-      #search the previous streams. Create a list of matching file names
+      # Search the previous streams. Create a list of matching file names.
       search_index=[x for x,y in enumerate(reassembled_streams) if (y[0])==parsed_stream[0]];
       if len(search_index)>0:
-        #if the file name already exists, append the raw bytes to those of the existing file
+        # If the file name already exists, append the raw bytes to those of the existing file.
         reassembled_streams[search_index[0]][1]=reassembled_streams[search_index[0]][1]+parsed_stream[1];
       else:
-        #the file has not yet had any packets parsed out, start a new reassembled stream
+        # The file has not yet had any packets parsed out, start a new reassembled stream.
         reassembled_streams.append(parsed_stream);
     elif x_protocol=='FTP-DATA':
-      #ftp streams are handled in a totally different method
+      # FTP streams are handled in a totally different method.
       ftp_data_streams.append(x_item[2].strip("\""));
     elif x_protocol!='':
-      #this shouldn't be possible, display a warning message
+      # This shouldn't be possible, display a warning message.
       print("WARNING: untrapped protocol: ---" + x_protocol + "---\n");
 
   for reassembled_item in reassembled_streams:
-    #write all reassembled streams to files
+    # Write all reassembled streams to files.
     fh=open(os.path.join(outdir,reassembled_item[0]),'w');
     fh.write(reassembled_item[1]);
     fh.close();
 
   for stream_number in ftp_data_streams:
-    #handle FTP streams
-    #for each stream, rerun tshark to extract raw data from the stream.
+    # Handle FTP streams.
+    # For each stream, rerun tshark to extract raw data from the stream.
     hex_stream_list = check_output(["tshark", "-q", "-n", "-r", infile, "-z", "follow,tcp,raw," + stream_number]).split("\n");
     list_length = len(hex_stream_list);
-    #strip the excess output from the tshark extraction
+    # Strip the excess output from the tshark extraction.
     hex_stream_text = ''.join(hex_stream_list[6:list_length-2]);
-    #convert the hex back to raw bytes
+    # Convert the hex back to raw bytes.
     file_bytes=binascii.unhexlify(hex_stream_text);
-    #write extracted FTP files
+    # Write extracted FTP files.
     fh=open(os.path.join(outdir,'ftp_stream_'+stream_number),'w');
     fh.write(file_bytes);
     fh.close();
@@ -165,9 +165,7 @@ def main(args):
     if not os.path.isdir(vars(args)['outdir']):
       raise;
 
-
   extract_files(vars(args)['outdir'], vars(args)['infile'], vars(args)['displayfilter']);
-
 
 if __name__ == "__main__":
   main(sys.argv[1:]);
