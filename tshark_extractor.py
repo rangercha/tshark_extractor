@@ -18,11 +18,11 @@ def parse_http_stream(matching_item):
   end_of_header=-1;
   file_bytes=binascii.unhexlify(matching_item[1].replace(":","").strip("\""));
   try:
-  #find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard
+    #find the end of the response header. This should always be \r\n\r\n to satisfy the HTTP standard
     end_of_header=file_bytes.index('\r\n\r\n')+4;
   except ValueError:
-    return; 
-  #print(matching_item[:end_of_header]);
+    return;
+    #print(matching_item[:end_of_header]);
   if 'Content-Encoding: gzip' in file_bytes[:end_of_header]:
     #Content-Encoding header indicates gzipped content. try to uncompress
     buf=StringIO(file_bytes[end_of_header:]);
@@ -52,7 +52,7 @@ def parse_tftp_stream(matching_item):
   #use either the source_file or destination_file, source port, and destination port for the file name
 
   file_name="tftp_stream_" + matching_item[6].strip("\"");
-  
+
   return [file_name,file_bytes];
 
 def extract_files(outdir, infile, displayfilter):
