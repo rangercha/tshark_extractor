@@ -9,7 +9,7 @@ Learn more about TShark: https://www.wireshark.org/docs/man-pages/tshark.html
 Run the script by specifying an input file with -i:
 `python thsark_extractor.py -i myfile.pcap`
 
-You may also specify an output file with -o, and a display filter with -D.
+You may also specify an output directory with -o, and a display filter with -D.
 
 Learn more about display filters: https://wiki.wireshark.org/DisplayFilters
 
